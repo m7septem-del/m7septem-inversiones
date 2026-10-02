@@ -1,8 +1,7 @@
 // ============================================================================
 // ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 1
-// EMPRESA: MSEPTEM Inversiones
-// ESTÁNDAR: Ciberseguridad Avanzada (OWASP Top 10) & Estética Obsidian & Gold
-// COMPONENTES: Diagnóstico de Infraestructura y Capa Perimetral de Seguridad
+// EMPRESA: MSEPTEM Tecnologías & Ciberseguridad Avanzada
+// COMPONENTES: Importaciones, Capa de Entorno y Conectores de Infraestructura
 // ============================================================================
 
 const express = require('express');
@@ -35,11 +34,11 @@ const ipsBloqueadas = new Map();    // Lista negra temporal de IPs restringidas
 // ----------------------------------------------------------------------------
 function registrarEventoAuditoria(evento, ip, usuario = 'ANÓNIMO', detalles = '') {
     const marcaTiempo = new Date().toISOString();
-    console.log(`[AUDITORÍA][\${marcaTiempo}][IP: \${ip}][OPERADOR: \${usuario}] ACCIÓN: \${evento} | \${detalles}`);
+    console.log(`[AUDITORÍA][${marcaTiempo}][IP: ${ip}][OPERADOR: ${usuario}] ACCIÓN: ${evento} | ${detalles}`);
 }
 // ============================================================================
 // ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 2
-// SECCIÓN: HEALTH CHECK CORPORATIVO Y FILTRO PERIMETRAL DE IPS BLOQUEADAS
+// SECCIÓN: HEALTH CHECK CORPORATIVO Y AUTOCREACIÓN DE TABLAS DE PRODUCTOS DINA
 // ============================================================================
 
 async function verificarSaludBaseDatos() {
@@ -48,36 +47,54 @@ async function verificarSaludBaseDatos() {
         const cliente = await pool.connect();
         console.log('[OK] Enlace físico establecido con el servidor PostgreSQL.');
         
-        const queryTablas = `
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name IN ('contactos', 'administradores');
-        `;
-        const res = await cliente.query(queryTablas);
-        const tablasExistentes = res.rows.map(r => r.table_name);
+        // Creamos dinámicamente las tablas si no existen para agilizar el despliegue
+        await cliente.query(`
+            CREATE TABLE IF NOT EXISTS contactos (
+                id SERIAL PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                email VARCHAR(100) NOT NULL,
+                telefono VARCHAR(30) NOT NULL,
+                monto_inversion VARCHAR(100) NOT NULL,
+                pais VARCHAR(60) NOT NULL,
+                mensaje TEXT NOT NULL,
+                fecha TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            CREATE TABLE IF NOT EXISTS administradores (
+                id SERIAL PRIMARY KEY,
+                usuario VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS productos (
+                id SERIAL PRIMARY KEY,
+                titulo VARCHAR(100) NOT NULL,
+                descripcion TEXT NOT NULL,
+                precio_nodo NUMERIC DEFAULT 0
+            );
+        `);
         
-        if (!tablasExistentes.includes('contactos') || !tablasExistentes.includes('administradores')) {
-            console.warn('[ADVERTENCIA] Esquema incompleto. Inyecte la base de datos estructural.');
-        } else {
-            console.log('[OK] Esquema físico verificado: Estructuras corporativas en línea.');
-        }
-        
+        console.log('[OK] Esquema físico verificado y tablas relacionales aseguradas.');
         cliente.release();
     } catch (error) {
         console.error('[CRÍTICO] Error de conexión con PostgreSQL:', error.message);
-        console.error('[SISTEMA] Operando en modo degradado temporal hasta restablecer enlace.');
+        console.error('[SISTEMA] Operando en modo degradado temporal.');
     }
 }
 verificarSaludBaseDatos();
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 3
+// SECCIÓN: HOJA DE MIDDLEWARES CONTRA ENTRADAS MALICIOSAS Y CONTROL DE IP
+// ============================================================================
 
-// Middleware para validar si la dirección IP se encuentra en lista negra temporal
+// Filtro activo de listas negras de IP
 app.use((req, res, next) => {
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const tiempoBloqueo = ipsBloqueadas.get(ipCliente);
 
     if (tiempoBloqueo) {
         if (Date.now() < tiempoBloqueo) {
-            return res.status(423).json({ error: 'Dirección IP bloqueada preventivamente por múltiples fallos de autenticación.' });
+            return res.status(423).json({ error: 'Dirección IP bloqueada preventivamente por fallos de autenticación.' });
         } else {
             ipsBloqueadas.delete(ipCliente);
             intentosLoginIP.delete(ipCliente);
@@ -101,8 +118,8 @@ app.use(helmet({
 
 app.use(express.json({ limit: '10kb' }));
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 3
-// SECCIÓN: SANITIZACIÓN ANTI-INYECCIÓN, LIMITADOR DE RITMO Y FILTRO JWT
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 4
+// SECCIÓN: CAPA DE SANITIZACIÓN OWASP Y CONTROLADORES DE PASS-THROUGH JWT
 // ============================================================================
 
 app.use((req, res, next) => {
@@ -123,15 +140,13 @@ app.use((req, res, next) => {
 const apiLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: { error: 'Tasa de peticiones excedida de forma perimetral.' },
-    standardHeaders: true,
-    legacyHeaders: false,
+    message: { error: 'Tasa de peticiones excedida de forma perimetral.' }
 });
 app.use('/api/', apiLimiter);
 
 const verificarToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ');
+    const token = authHeader && authHeader.split(' ')[1];
 
     if (!token) return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
 
@@ -143,27 +158,41 @@ const verificarToken = (req, res, next) => {
     });
 };
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 4
-// SECCIÓN: ENDPOINTS PÚBLICOS - REGISTRO DE LEADS E INICIO DE AUTENTICACIÓN
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 5
+// SECCIÓN: ENDPOINTS PÚBLICOS - INGESTIÓN DE LEADS Y CONSULTA DINÁMICA DE REPOSITORIO
 // ============================================================================
 
+// Inserción parametrizada de leads tecnológicos
 app.post('/api/contacto', async (req, res) => {
     const { nombre, email, telefono, monto_inversion, pais, mensaje } = req.body;
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
     if (!nombre || !email || !telefono || !monto_inversion || !pais || !mensaje || !email.includes('@')) {
-        registrarEventoAuditoria('INTENTO_CONTACTO_FALLIDO', ipCliente, 'ANÓNIMO', 'Estructura inválida o incompleta enviada.');
         return res.status(400).json({ error: 'Todos los campos institucionales son de carácter obligatorio.' });
     }
 
     try {
-        const query = 'INSERT INTO contactos (nombre, email, telefono, monto_inversion, pais, mensaje) VALUES (\$1, \$2, \$3, \$4, \$5, \$6) RETURNING id';
+        const query = 'INSERT INTO contactos (nombre, email, telefono, monto_inversion, pais, mensaje) VALUES ($1, $2, $3, $4, $5, $6)';
         await pool.query(query, [nombre, email, telefono, monto_inversion, pais, mensaje]);
-        return res.status(200).json({ status: 'success', message: 'Datos corporativos resguardados en el historial de la firma.' });
+        return res.status(200).json({ status: 'success', message: 'Datos corporativos resguardados.' });
     } catch (error) {
-        return res.status(500).json({ error: 'Fallo general de persistencia en infraestructura.' });
+        return res.status(500).json({ error: 'Fallo general de persistencia.' });
     }
 });
+
+// Endpoint Público para leer los productos guardados en la BD
+app.get('/api/productos', async (req, res) => {
+    try {
+        const resultado = await pool.query('SELECT * FROM productos ORDER BY id ASC');
+        return res.status(200).json(resultado.rows);
+    } catch (error) {
+        return res.status(500).json({ error: 'Error al consultar catálogo de software.' });
+    }
+});
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 6
+// SECCIÓN: PASARELA DE SEGURIDAD MULTIFACTOR DE ACCESO PARA OPERADORES
+// ============================================================================
 
 app.post('/api/auth/login', async (req, res) => {
     const { usuario, password } = req.body;
@@ -177,97 +206,86 @@ app.post('/api/auth/login', async (req, res) => {
             let fallos = intentosLoginIP.get(ipCliente) || 0;
             fallos++;
             intentosLoginIP.set(ipCliente, fallos);
-            if (fallos >= 5) {
-                ipsBloqueadas.set(ipCliente, Date.now() + 15 * 60 * 1000);
-                registrarEventoAuditoria('IP_BLOQUEADA_FUERZA_BRUTA', ipCliente, usuario, 'Se han registrado 5 fallos consecutivos de login.');
-                return true;
-            }
+            if (fallos >= 5) { ipsBloqueadas.set(ipCliente, Date.now() + 15 * 60 * 1000); return true; }
             return false;
         };
 
         if (result.rows.length === 0) {
-            const bloqueoActivado = procesarFalloAutenticacion();
-            return res.status(401).json({ error: bloqueoActivado ? 'IP bloqueada por múltiples intentos fallidos.' : 'Credenciales del operador inválidas.' });
+            const blk = procesarFalloAutenticacion();
+            return res.status(401).json({ error: blk ? 'IP Bloqueada.' : 'Credenciales inválidas.' });
         }
 
         const admin = result.rows[0]; 
         const passwordValido = await bcrypt.compare(password, admin.password_hash);
 
         if (!passwordValido) {
-            const bloqueoActivado = procesarFalloAutenticacion();
-            return res.status(401).json({ error: bloqueoActivado ? 'IP bloqueada por múltiples intentos fallidos.' : 'Credenciales del operador inválidas.' });
+            const blk = procesarFalloAutenticacion();
+            return res.status(401).json({ error: blk ? 'IP Bloqueada.' : 'Credenciales inválidas.' });
         }
 
         intentosLoginIP.delete(ipCliente);
-
         const pin2FA = Math.floor(100000 + Math.random() * 900000).toString();
         almacénPines2FA.set(admin.usuario, { pin: pin2FA, adminId: admin.id, expiracion: Date.now() + 120000 });
 
-        registrarEventoAuditoria('TOKEN_2FA_GENERADO', ipCliente, admin.usuario, `PIN temporal asignado: \${pin2FA} (Validez de 120s)`);
-
-        return res.status(200).json({ 
-            status: '2fa_required', 
-            usuario: admin.usuario,
-            message: 'Primer factor validado. Ingrese el código reflejado en los registros de la firma.' 
-        });
-    } catch (error) {
-        return res.status(500).json({ error: 'Pasarela de autenticación inaccesible temporalmente.' });
-    }
+        registrarEventoAuditoria('TOKEN_2FA_GENERADO', ipCliente, admin.usuario, `PIN: ${pin2FA}`);
+        return res.status(200).json({ status: '2fa_required', usuario: admin.usuario, message: 'Fase 1 completada. Ingrese PIN de bitácora.' });
+    } catch (error) { return res.status(500).json({ error: 'Pasarela inalcanzable.' }); }
 });
-// ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 5
-// SECCIÓN: ENDPOINTS PROTEGIDOS POR JWT - CONTROL DE ACCESO INTERNO Y ANALÍTICAS
-// ============================================================================
 
 app.post('/api/auth/verificar-2fa', async (req, res) => {
     const { usuario, pin } = req.body;
-    const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const datos2FA = almacénPines2FA.get(usuario);
 
-    if (!datos2FA) return res.status(400).json({ error: 'El PIN ha expirado o no ha sido solicitado.' });
+    if (!datos2FA) return res.status(400).json({ error: 'El PIN ha expirado o no existe.' });
     if (Date.now() > datos2FA.expiracion) { almacénPines2FA.delete(usuario); return res.status(400).json({ error: 'El código temporal ha caducado.' }); }
-    if (datos2FA.pin !== pin) { registrarEventoAuditoria('VIOLACION_PERMISO_2FA', ipCliente, usuario, 'PIN erróneo.'); return res.status(401).json({ error: 'Código de seguridad incorrecto.' }); }
+    if (datos2FA.pin !== pin) return res.status(401).json({ error: 'Código de seguridad incorrecto.' });
 
     almacénPines2FA.delete(usuario);
     const token = jwt.sign({ id: datos2FA.adminId, user: usuario }, JWT_SECRET, { expiresIn: '1h' });
-    registrarEventoAuditoria('ACCESO_CONCEDIDO', ipCliente, usuario, 'Autenticación multifactor completada.');
-
     return res.status(200).json({ status: 'success', token });
 });
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 7
+// SECCIÓN: CAPA CMS DEL SERVIDOR - CONTROLADOR DE CONTENIDOS DINÁMICOS
+// ============================================================================
 
-app.post('/api/admin/update-password', verificarToken, async (req, res) => {
-    const { passwordActual, passwordNuevo } = req.body;
+// Agregar Producto Nuevo a la Landing (Protegido por JWT)
+app.post('/api/admin/productos', verificarToken, async (req, res) => {
+    const { titulo, descripcion, precio_nodo } = req.body;
+    if (!titulo || !descripcion) return res.status(400).json({ error: 'Faltan parámetros del producto.' });
+
     try {
-        const queryBusqueda = 'SELECT * FROM administradores WHERE id = \$1';
-        const resultBusqueda = await pool.query(queryBusqueda, [req.adminId]);
-        const admin = resultBusqueda.rows[0];
-        const validacionActual = await bcrypt.compare(passwordActual, admin.password_hash);
-
-        if (!validacionActual) return res.status(401).json({ error: 'La verificación de la clave actual ha fallado.' });
-
-        const nuevoHash = await bcrypt.hash(passwordNuevo, 10);
-        await pool.query('UPDATE administradores SET password_hash = \$1 WHERE id = \$2', [nuevoHash, req.adminId]);
-        return res.status(200).json({ status: 'success', message: 'Firma digital corporativa reestructurada.' });
-    } catch (error) { return res.status(500).json({ error: 'Error del motor al reescribir hashes.' }); }
+        await pool.query('INSERT INTO productos (titulo, descripcion, precio_nodo) VALUES ($1, $2, $3)', [titulo, descripcion, precio_nodo || 0]);
+        return res.status(200).json({ status: 'success', message: 'Producto inyectado a la landing.' });
+    } catch (error) {
+        return res.status(500).json({ error: 'Error de persistencia de catálogo.' });
+    }
 });
 
+// Eliminar Producto de la Landing (Protegido por JWT)
+app.delete('/api/admin/productos/:id', verificarToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        await pool.query('DELETE FROM productos WHERE id = $1', [id]);
+        return res.status(200).json({ status: 'success', message: 'Producto removido de la landing.' });
+    } catch (error) {
+        return res.status(500).json({ error: 'Error al purgar software.' });
+    }
+});
+
+// Métricas de Consola
 app.get('/api/admin/metricas', verificarToken, async (req, res) => {
     try {
         const queryMetricas = "SELECT TO_CHAR(fecha, 'YYYY-MM-DD') as dia, COUNT(*) as cantidad FROM contactos GROUP BY dia ORDER BY dia ASC LIMIT 7;";
         const queryResumen = "SELECT COUNT(*) as total, COUNT(CASE WHEN fecha >= CURRENT_DATE THEN 1 END) as hoy FROM contactos;";
-        
         const resMetricas = await pool.query(queryMetricas);
         const resResumen = await pool.query(queryResumen);
-
-        return res.status(200).json({
-            historico: resMetricas.rows,
-            resumen: { total: parseInt(resResumen.rows[0].total || 0), hoy: parseInt(resResumen.rows[0].hoy || 0) }
-        });
-    } catch (error) { return res.status(500).json({ error: 'Fallo al extraer métricas analíticas reales.' }); }
+        return res.status(200).json({ historico: resMetricas.rows, resumen: { total: parseInt(resResumen.rows.total || 0), hoy: parseInt(resResumen.rows.hoy || 0) } });
+    } catch (error) { return res.status(500).json({ error: 'Fallo al extraer métricas.' }); }
 });
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 6
-// SECCIÓN: EXTRACTOR DE BITÁCORA MULTICOLUMNA Y ARRANQUE DE TOKEN VISUAL CSS3
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 8
+// SECCIÓN: EXTRACTOR DE MENSAJES CORPORATIVOS Y MAQUETACIÓN VISUAL DE LA FIRMA
 // ============================================================================
 
 app.get('/api/admin/mensajes', verificarToken, async (req, res) => {
@@ -278,30 +296,22 @@ app.get('/api/admin/mensajes', verificarToken, async (req, res) => {
 
     try {
         let queryData, queryCount, paramsData, paramsCount;
-
         if (search) {
             const searchParam = `%\${search}%`;
-            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos WHERE nombre ILIKE \$1 OR email ILIKE \$1 OR pais ILIKE \$1 ORDER BY fecha DESC LIMIT \$2 OFFSET \$3';
+            queryData = 'SELECT * FROM contactos WHERE nombre ILIKE $1 OR email ILIKE $1 OR pais ILIKE $1 ORDER BY fecha DESC LIMIT $2 OFFSET $3';
             paramsData = [searchParam, limit, offset];
-            queryCount = 'SELECT COUNT(*) FROM contactos WHERE nombre ILIKE \$1 OR email ILIKE \$1 OR pais ILIKE \$1';
+            queryCount = 'SELECT COUNT(*) FROM contactos WHERE nombre ILIKE $1 OR email ILIKE $1 OR pais ILIKE $1';
             paramsCount = [searchParam];
         } else {
-            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos ORDER BY fecha DESC LIMIT \$1 OFFSET \$2';
+            queryData = 'SELECT * FROM contactos ORDER BY fecha DESC LIMIT $1 OFFSET $2';
             paramsData = [limit, offset];
             queryCount = 'SELECT COUNT(*) FROM contactos';
             paramsCount = [];
         }
-
         const resData = await pool.query(queryData, paramsData);
         const resCount = await pool.query(queryCount, paramsCount);
-        const totalRegistros = parseInt(resCount.rows[0].count);
-        const totalPaginas = Math.ceil(totalRegistros / limit);
-
-        return res.status(200).json({
-            data: resData.rows,
-            pagination: { page, limit, totalRegistros, totalPaginas }
-        });
-    } catch (error) { return res.status(500).json({ error: 'Error de consulta en el almacén transaccional.' }); }
+        return res.status(200).json({ data: resData.rows, pagination: { page, limit, totalRegistros: parseInt(resCount.rows[0].count), totalPaginas: Math.ceil(parseInt(resCount.rows[0].count) / limit) } });
+    } catch (error) { return res.status(500).json({ error: 'Error de consulta.' }); }
 });
 
 app.get('/', (req, res) => {
@@ -311,7 +321,7 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MSEPTEM Inversiones | Capital Privado</title>
+    <title>MSEPTEM Tecnologías | Ciberseguridad</title>
     <link href="https://googleapis.com" rel="stylesheet">
     <style>
         :root {
@@ -324,463 +334,363 @@ app.get('/', (req, res) => {
             --border-gold: rgba(212, 175, 55, 0.2);
             --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
-
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background-color: var(--obsidian-deep); color: var(--text-light); font-family: 'Montserrat', sans-serif; line-height: 1.6; overflow-x: hidden; }
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 9
+// SECCIÓN: ARQUITECTURA CSS DE TENDENCIA - BOTONES Y CONTENEDORES GLASS EFFECT
+// ============================================================================
 
         header { background: linear-gradient(180deg, rgba(18,18,18,0.95) 0%, rgba(26,26,26,0.8) 100%); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border-gold); position: fixed; width: 100%; top: 0; z-index: 1000; padding: 1.25rem 5%; display: flex; justify-content: space-between; align-items: center; }
         .logo { font-family: 'Cinzel', serif; font-size: 1.5rem; font-weight: 700; color: var(--gold-primary); letter-spacing: 2px; }
-        .nav-btn { background: none; border: 1px solid var(--border-gold); color: var(--gold-primary); padding: 0.5rem 1rem; cursor: pointer; font-family: 'Montserrat', sans-serif; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; transition: var(--transition); }
-        .nav-btn:hover { background-color: var(--gold-primary); color: var(--obsidian-deep); }
-        .hero { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 1rem; background: radial-gradient(circle at center, #1e1b13 0%, var(--obsidian-deep) 70%); margin-top: 60px; }
+        
+        /* Botones de Navegación Estilo Vidrioso (Glassmorphism Oficial) */
+        .glass-btn, .nav-glass-btn {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(212, 175, 55, 0.2);
+            color: var(--text-light);
+            padding: 0.7rem 1.4rem;
+            cursor: pointer;
+            font-family: 'Montserrat', sans-serif;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+        .glass-btn:hover, .nav-glass-btn:hover, .nav-glass-btn.active {
+            background: rgba(212, 175, 55, 0.15);
+            border-color: var(--gold-primary);
+            color: var(--gold-primary);
+            box-shadow: 0 0 15px rgba(212, 175, 55, 0.25);
+            transform: translateY(-2px);
+        }
+
+        .nav-glass-container { display: flex; justify-content: center; gap: 1rem; margin: -2rem auto 4rem auto; width: 90%; max-width: 1200px; flex-wrap: wrap; }
+        .hero { min-height: 70vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 1rem; background: radial-gradient(circle at center, #1b170e 0%, var(--obsidian-deep) 70%); margin-top: 80px; }
         .hero h1 { font-family: 'Cinzel', serif; font-size: 3.5rem; color: var(--gold-primary); margin-bottom: 1rem; letter-spacing: 4px; }
-        .hero p { font-size: 1.1rem; max-width: 600px; color: var(--text-muted); margin-bottom: 2.5rem; font-weight: 300; }
-        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; width: 90%; max-width: 1200px; margin: -4rem auto 4rem auto; }
+        .hero p { font-size: 1.1rem; max-width: 700px; color: var(--text-muted); margin-bottom: 2.5rem; font-weight: 300; }
+
+        .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; width: 90%; max-width: 1200px; margin: 0 auto 4rem auto; }
         .card { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2.5rem 2rem; border-radius: 4px; transition: var(--transition); }
-        .card:hover { transform: translateY(-5px); border-color: var(--gold-primary); box-shadow: 0 10px 30px rgba(212, 175, 55, 0.1); }
-        .card h3 { font-family: 'Cinzel', serif; color: var(--gold-primary); margin-bottom: 1rem; }
-        .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; width: 100%; }
-        .stat-card { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 1.5rem; border-radius: 4px; text-align: center; }
-        .stat-card h4 { font-family: 'Cinzel', serif; color: var(--gold-primary); font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 1px; }
-        .stat-card .value { font-size: 2rem; font-weight: 600; color: var(--text-light); }
-        .form-section, .admin-section, .config-section { background-color: var(--obsidian-surface); max-width: 550px; margin: 4rem auto; padding: 3rem; border-radius: 4px; border: 1px solid var(--border-gold); }
-        .form-section h2, .admin-section h2, .config-section h2 { font-family: 'Cinzel', serif; color: var(--gold-primary); margin-bottom: 1.5rem; text-align: center; letter-spacing: 1px; }
-        .form-group { margin-bottom: 1.5rem; }
-        .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; }
-        .form-control { width: 100%; background-color: var(--obsidian-elevated); border: 1px solid var(--border-gold); color: var(--text-light); padding: 0.85rem; font-family: 'Montserrat', sans-serif; border-radius: 2px; transition: var(--transition); }
-        .form-control:focus { outline: none; border-color: var(--gold-primary); box-shadow: 0 0 5px rgba(212, 175, 55, 0.3); }
-        .btn-gold { width: 100%; background: linear-gradient(135deg, #b8860b 0%, var(--gold-primary) 100%); color: var(--obsidian-deep); border: none; padding: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; transition: var(--transition); }
-        .btn-gold:hover { background: linear-gradient(135deg, var(--gold-primary) 0%, #f3e5ab 100%); box-shadow: 0 0 15px rgba(212, 175, 55, 0.4); }
-        .hidden { display: none !important; }
-        .dashboard-view { max-width: 1200px; margin: 100px auto 4rem auto; padding: 0 2rem; }
-        .chart-wrapper { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2rem; border-radius: 4px; margin-bottom: 2rem; width: 100%; max-height: 400px; }
-        .search-container { margin-bottom: 1.5rem; display: flex; width: 100%; max-width: 400px; }
-        .pagination-container { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 1rem 0; }
-        .table-container { width: 100%; overflow-x: auto; background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; text-align: left; }
-        th, td { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(212, 175, 55, 0.1); }
-        th { background-color: var(--obsidian-elevated); color: var(--gold-primary); font-family: 'Cinzel', serif; font-size: 0.9rem; }
-        tr:hover { background-color: rgba(212, 175, 55, 0.02); }
-        .toast-container { position: fixed; bottom: 2rem; right: 2rem; z-index: 9999; display: flex; flex-direction: column; gap: 1rem; }
-        .toast { background-color: var(--obsidian-surface); border-left: 4px solid var(--gold-primary); color: var(--text-light); padding: 1rem 1.5rem; border-radius: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); min-width: 300px; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .toast.error { border-left-color: #8b0000; }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
-    </style>
-    <script src="https://cloudflare.com"></script>
-</head>
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE A
-// SECCIÓN: MAQUETACIÓN GLOBAL DEL DOM - INTERFAZ PÚBLICA Y SIMULADOR FINANCIERO
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 10
+// SECCIÓN: ESTILOS DE FORMULARIOS, TABLAS DE CONTROL Y ANIMACIONES DINÁMICAS
 // ============================================================================
 
-        .hidden { display: none !important; }
-        .dashboard-view { max-width: 1200px; margin: 100px auto 4rem auto; padding: 0 2rem; }
-        .chart-wrapper { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2rem; border-radius: 4px; margin-bottom: 2rem; width: 100%; max-height: 400px; }
+        .section-container { display: none; width: 100%; animation: fadeIn 0.4s ease forwards; }
+        .section-container.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; width: 100%; }
+        .stat-card { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 1.5rem; border-radius: 4px; text-align: center; }
+        .stat-card h4 { font-family: 'Cinzel', serif; color: var(--gold-primary); font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.5rem; }
+        .stat-card .value { font-size: 2rem; font-weight: 600; }
+
+        .form-section, .admin-section, .config-section { background-color: var(--obsidian-surface); max-width: 600px; margin: 4rem auto; padding: 3rem; border-radius: 4px; border: 1px solid var(--border-gold); }
+        .form-section h2, .admin-section h2, .config-section h2 { font-family: 'Cinzel', serif; color: var(--gold-primary); margin-bottom: 1.5rem; text-align: center; }
         
-        .search-container { margin-bottom: 1.5rem; display: flex; width: 100%; max-width: 400px; }
-        .pagination-container { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 1rem 0; }
+        .form-group { margin-bottom: 1.5rem; }
+        .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; }
+        .form-control { width: 100%; background-color: var(--obsidian-elevated); border: 1px solid var(--border-gold); color: var(--text-light); padding: 0.85rem; font-family: 'Montserrat', sans-serif; border-radius: 2px; }
         
-        .table-container { width: 100%; overflow-x: auto; background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); border-radius: 4px; }
-        table { width: 100%; border-collapse: collapse; text-align: left; }
-        th, td { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(212, 175, 55, 0.1); }
-        th { background-color: var(--obsidian-elevated); color: var(--gold-primary); font-family: 'Cinzel', serif; font-size: 0.9rem; }
-        tr:hover { background-color: rgba(212, 175, 55, 0.02); }
+        .btn-gold { width: 100%; background: rgba(212, 175, 55, 0.05); border: 1px solid var(--gold-primary); color: var(--gold-primary); padding: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; border-radius: 4px; transition: var(--transition); }
+        .btn-gold:hover { background: linear-gradient(135deg, var(--gold-primary) 0%, #f3e5ab 100%); color: var(--obsidian-deep); box-shadow: 0 0 20px rgba(212, 175, 55, 0.3); }
         
+        .chart-wrapper { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2rem; border-radius: 4px; margin-bottom: 2rem; height: 350px; }
         .toast-container { position: fixed; bottom: 2rem; right: 2rem; z-index: 9999; display: flex; flex-direction: column; gap: 1rem; }
-        .toast { background-color: var(--obsidian-surface); border-left: 4px solid var(--gold-primary); color: var(--text-light); padding: 1rem 1.5rem; border-radius: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); min-width: 300px; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .toast { background-color: var(--obsidian-surface); border-left: 4px solid var(--gold-primary); color: var(--text-light); padding: 1rem 1.5rem; border-radius: 4px; min-width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .toast.error { border-left-color: #8b0000; }
-        
-        @keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
-        @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
     </style>
     <script src="https://cloudflare.com"></script>
 </head>
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 11
+// SECCIÓN: CUERPO HTML - CONMUTADORES DE CANALES DE PÁGINAS INDEPENDIENTES
+// ============================================================================
+
 <body>
     <div class="toast-container" id="toastContainer"></div>
 
     <header>
-        <div class="logo" id="brandLogo" style="cursor:pointer;">MSEPTEM</div>
-        <button class="nav-btn" id="adminToggleBtn">Portal Interno</button>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <svg width="28" height="28" viewBox="0 0 100 100" fill="none" xmlns="http://w3.org">
+                <path d="M50 5L55 25H45L50 5Z" fill="#D4AF37"/>
+                <rect x="48" y="25" width="4" height="50" fill="#D4AF37"/>
+                <rect x="35" y="35" width="30" height="4" fill="#D4AF37"/>
+            </svg>
+            <div class="logo" id="brandLogo" style="cursor:pointer; font-family:'Cinzel';">MSEPTEM</div>
+        </div>
+        <button class="glass-btn" id="adminToggleBtn">Portal Interno</button>
     </header>
 
-    <!-- INTERFAZ PÚBLICA PRINCIPAL -->
     <div id="publicView">
         <section class="hero">
-            <h1>MSEPTEM INVERSIONES</h1>
-            <p>Arquitectura financiera avanzada y gestión de patrimonio institucional bajo los más estrictos estándares globales de seguridad corporativa.</p>
+            <h1>MSEPTEM TECNOLOGÍAS</h1>
+            <p>Ingeniería de sistemas críticos, encriptación avanzada de datos y blindaje de infraestructuras tácticas operativas.</p>
         </section>
-        <div class="grid-container">
-            <div class="card"><h3>Private Equity</h3><p>Acceso exclusivo a vehículos de inversión en mercados privados y activos alternativos de alto rendimiento.</p></div>
-            <div class="card"><h3>Wealth Management</h3><p>Estrategias personalizadas de preservación y crecimiento patrimonial con mitigación activa de riesgos.</p></div>
-            <div class="card"><h3>Corporate Security</h3><p>Estructuras tecnológicas y operativas blindadas para transacciones corporativas de alta confianza.</p></div>
+
+        <!-- Barra de Conmutación Vidriosa para Navegación Cómoda -->
+        <div class="nav-glass-container">
+            <button class="nav-glass-btn active" id="nav-inicio" onclick="switchPublicSection('sec-inicio')">Inicio</button>
+            <button class="nav-glass-btn" id="nav-productos" onclick="switchPublicSection('sec-productos')">Módulos & Catálogo</button>
+            <button class="nav-glass-btn" id="nav-nosotros" onclick="switchPublicSection('sec-nosotros')">Nosotros</button>
+            <button class="nav-glass-btn" id="nav-contacto" style="border-style:dashed;" onclick="switchPublicSection('sec-contacto')">Iniciar Conexión</button>
         </div>
 
-        <!-- Módulo del Simulador de Rendimientos Financieros -->
-        <section class="form-section" style="max-width: 700px; margin: 2rem auto;">
-            <h2>Simulador de Capital Alternativo</h2>
-            <div class="form-group">
-                <label>Inversión Inicial ($ USD)</label>
-                <input type="number" id="simMonto" class="form-control" value="50000" step="5000">
+        <!-- PÁGINA VIRTUAL 1: INICIO -->
+        <div id="sec-inicio" class="section-container active">
+            <div class="grid-container">
+                <div class="card"><h3>Custom Software</h3><p>Plataformas monolíticas de alta disponibilidad construidas a medida de la firma corporativa.</p></div>
+                <div class="card"><h3>Security Apps</h3><p>Aplicaciones móviles con capas criptográficas asimétricas y aislamiento local de memoria.</p></div>
+                <div class="card"><h3>Cybersecurity</h3><p>Auditorías forenses, desarticulación de exploits y análisis perimetral automatizado.</p></div>
             </div>
-            <div class="form-group">
-                <label>Plazo Estimado (Años)</label>
-                <input type="range" id="simPlazo" min="1" max="10" value="5" class="form-control" oninput="document.getElementById('plazoVal').innerText = this.value">
-                <span id="plazoVal" style="color:var(--gold-primary); font-size:0.9rem;">5</span> <span style="color:var(--text-muted); font-size:0.9rem;">Años</span>
-            </div>
-            <div class="form-group">
-                <label>Tasa de Rendimiento Anual Esperada (% APR)</label>
-                <select id="simTasa" class="form-control">
-                    <option value="0.12">Clase A (12% Retorno Preferente)</option>
-                    <option value="0.18" selected>Clase Alpha Premium (18% Co-Inversión)</option>
-                    <option value="0.24">Clase Oportunística (24% Mercado Privado)</option>
-                </select>
-            </div>
-            <button type="button" class="btn-gold" id="btnCalcularSim">Proyectar Retorno Estimado</button>
-            <div id="simResultado" style="margin-top:2rem; text-align:center; display:none; border-top:1px dashed var(--border-gold); padding-top:1.5rem;">
-                <p style="font-size:0.9rem; color:var(--text-muted); text-transform:uppercase;">Patrimonio Proyectado Final</p>
-                <h3 id="simTotal" style="font-family:'Cinzel'; color:var(--gold-primary); font-size:2.2rem; margin-bottom:0.5rem;">$0.00</h3>
-                <p style="font-size:0.85rem; color:var(--text-muted);">*Cálculo de interés compuesto ilustrativo para firmas asociadas.</p>
-            </div>
-        </section>
+        </div>
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE B
-// SECCIÓN: MAQUETACIÓN ESTRUCTURAL DE FORMULARIOS AMPLIADOS Y TABLA DE COMUNICACIONES
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 12
+// SECCIÓN: MAQUETACIÓN DE RUTA DE FILOSOFÍA, LEADS Y VISTAS DE ENTRADA AL PANEL
 // ============================================================================
 
-        <!-- Formulario Ampliado de Captación Corporativa -->
-        <section class="form-section">
-            <h2>Contacto Institucional</h2>
-            <form id="contactForm">
-                <div class="form-group"><label>Nombre Completo</label><input type="text" id="nombre" class="form-control" required autocomplete="off"></div>
-                <div class="form-group"><label>Correo Corporativo</label><input type="email" id="email" class="form-control" required autocomplete="off"></div>
-                <div class="form-group"><label>Teléfono Corporativo</label><input type="tel" id="telefono" class="form-control" placeholder="+1 234 567 890" required autocomplete="off"></div>
-                <div class="form-group">
-                    <label>Monto Estimado de Inversión</label>
-                    <select id="montoInversion" class="form-control" required>
-                        <option value="" disabled selected>Seleccione un rango corporativo</option>
-                        <option value="tier_1">$250,000 USD - $1,000,000 USD</option>
-                        <option value="tier_2">$1,000,000 USD - $5,000,000 USD</option>
-                        <option value="tier_3">$5,000,000 USD+</option>
-                    </select>
-                </div>
-                <div class="form-group"><label>País de Origen de la Firma</label><input type="text" id="pais" class="form-control" placeholder="Ej. Venezuela, España, etc." required autocomplete="off"></div>
-                <div class="form-group"><label>Requerimiento Institucional</label><textarea id="mensaje" class="form-control" rows="4" required></textarea></div>
-                <button type="submit" class="btn-gold">Iniciar Conexión Segura</button>
-            </form>
-        </section>
+        <!-- PÁGINA VIRTUAL 2: MÓDULOS DEL CATÁLOGO DINÁMICO DESDE POSTGRESQL -->
+        <div id="sec-productos" class="section-container">
+            <div class="grid-container" id="contenedorProductosPublicos">
+                <!-- Se inyectan de forma asíncrona desde el repositorio sin tocar código -->
+            </div>
+        </div>
+
+        <!-- PÁGINA VIRTUAL 3: FILOSOFÍA -->
+        <div id="sec-nosotros" class="section-container">
+            <div class="grid-container">
+                <div class="card"><h3>Misión</h3><p>Garantizar el blindaje informático integral de nuestros aliados optimizando sus sistemas operativos.</p></div>
+                <div class="card"><h3>Visión</h3><p>Posicionar a MSEPTEM a la vanguardia internacional en el desarrollo de software militar de alta confianza.</p></div>
+                <div class="card"><h3>Objetivos</h3><p>Erradicar vectores de ataque mediante encriptación nativa y asegurar redundancia de datos distributed del 99.99%.</p></div>
+            </div>
+        </div>
+
+        <!-- PÁGINA VIRTUAL 4: FORMULARIO -->
+        <div id="sec-contacto" class="section-container">
+            <section class="form-section" style="margin-top:0;">
+                <h2>Requerimiento Tecnológico Especializado</h2>
+                <form id="contactForm">
+                    <div class="form-group"><label>Nombre de la Firma / Cliente</label><input type="text" id="nombre" class="form-control" required autocomplete="off"></div>
+                    <div class="form-group"><label>Correo de Seguridad</label><input type="email" id="email" class="form-control" required autocomplete="off"></div>
+                    <div class="form-group"><label>Teléfono Directo</label><input type="tel" id="telefono" class="form-control" required autocomplete="off"></div>
+                    <div class="form-group">
+                        <label>Categoría del Despliegue</label>
+                        <select id="montoInversion" class="form-control" required>
+                            <option value="App Móvil">App Móvil Secure</option>
+                            <option value="Encriptador PC">Software Encriptador de PC</option>
+                            <option value="Software Militar">Software Militares</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>País</label><input type="text" id="pais" class="form-control" required autocomplete="off"></div>
+                    <div class="form-group"><label>Especificaciones</label><textarea id="mensaje" class="form-control" rows="4" required></textarea></div>
+                    <button type="submit" class="btn-gold">Iniciar Conexión Segura</button>
+                </form>
+            </section>
+        </div>
     </div>
 
-    <!-- PORTAL DE ACCESO (FASE 1: CREDENCIALES) -->
+    <!-- VISTAS DE LOGIN Y AUTENTICACIÓN -->
     <div id="loginView" class="hidden">
-        <section class="admin-section" style="margin-top: 120px;">
+        <section class="admin-section" style="margin-top:120px;">
             <h2>Autenticación de Firma</h2>
             <form id="loginForm">
-                <div class="form-group"><label>Identificador del Operador</label><input type="text" id="username" class="form-control" required autocomplete="off"></div>
-                <div class="form-group"><label>Clave de Acceso Criptográfica</label><input type="password" id="password" class="form-control" required></div>
-                <button type="submit" class="btn-gold">Validar Credenciales</button>
+                <div class="form-group"><label>Operador</label><input type="text" id="username" class="form-control" required autocomplete="off"></div>
+                <div class="form-group"><label>Firma Criptográfica</label><input type="password" id="password" class="form-control" required></div>
+                <button type="submit" class="btn-gold">Validar Entrada</button>
             </form>
         </section>
     </div>
 
-    <!-- PORTAL DE ACCESO (FASE 2: MULTIFACTOR 2FA VERIFICATION) -->
     <div id="twoFactorView" class="hidden">
-        <section class="admin-section" style="margin-top: 120px;">
+        <section class="admin-section" style="margin-top:120px;">
             <h2>Verificación Perimetral 2FA</h2>
             <form id="twoFactorForm">
-                <div class="form-group">
-                    <label>Código Temporal de Acceso (PIN)</label>
-                    <input type="text" id="pinInput" class="form-control" placeholder="6 dígitos" required autocomplete="off" maxlength="6" style="text-align:center; font-size:1.5rem; letter-spacing:8px;">
-                </div>
-                <button type="submit" class="btn-gold">Autorizar Entrada</button>
+                <div class="form-group"><label>PIN de Auditoría</label><input type="text" id="pinInput" class="form-control" maxlength="6" style="text-align:center; font-size:1.5rem; letter-spacing:6px;" required autocomplete="off"></div>
+                <button type="submit" class="btn-gold">Autorizar Acceso</button>
             </form>
         </section>
     </div>
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 13
+// SECCIÓN: CONSOLA DE GESTIÓN INTERNA - CRUDS INTEGRADOS DE CONTROL DE CONTENIDOS
+// ============================================================================
 
-    <!-- CONSOLA DE GESTIÓN INTERNA (DASHBOARD REAL-TIME) -->
-    <div id="dashboardView" class="hidden dashboard-view" style="margin-top:120px; padding: 0 5%;">
+    <div id="dashboardView" class="hidden dashboard-view" style="margin-top:120px;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;">
-            <h2 style="font-family:'Cinzel'; color:var(--gold-primary);">Consola de Comunicaciones</h2>
-            <div style="display:flex; align-items:center;">
-                <span id="sessionTimer" style="font-size:0.85rem; color:var(--gold-primary); margin-right:1.5rem; border:1px solid var(--border-gold); padding:0.4rem 0.8rem; border-radius:2px;">Sesión Segura: 15:00</span>
-                <button class="nav-btn" id="goConfigBtn" style="margin-right: 1rem;">Seguridad / Firma</button>
-                <button class="nav-btn" id="exportCsvBtn" style="border-color: var(--gold-primary); margin-right: 1rem;">Exportar (CSV)</button>
-                <button class="nav-btn" id="logoutBtn" style="border-color:#8b0000; color:#ff4444;">Cerrar Consola</button>
+            <h2 style="font-family:'Cinzel'; color:var(--gold-primary);">Consola de Control de Cómputo</h2>
+            <div>
+                <span id="sessionTimer" style="color:var(--gold-primary); margin-right:1rem;">Sesión: 15:00</span>
+                <button class="glass-btn" id="exportCsvBtn" style="margin-right:0.5rem;">CSV</button>
+                <button class="glass-btn" id="logoutBtn" style="border-color:#8b0000; color:#ff4444;">Cerrar</button>
             </div>
         </div>
-        <div class="analytics-grid">
-            <div class="stat-card"><h4>Comunicaciones Recibidas (Hoy)</h4><div class="value" id="statHoy">0</div></div>
-            <div class="stat-card"><h4>Historial Acumulado Total</h4><div class="value" id="statTotal">0</div></div>
+
+        <!-- SECCIÓN CMS: AGREGAR PRODUCTOS EN TIEMPO REAL SIN TOCAR CÓDIGO -->
+        <div class="form-section" style="margin: 0 auto 3rem auto; max-width:100%;">
+            <h3 style="font-family:'Cinzel'; color:var(--gold-primary); margin-bottom:1rem;">Administrador de Catálogo (CMS Real-Time)</h3>
+            <form id="cmsForm">
+                <div class="form-group"><label>Nombre del Producto / Software</label><input type="text" id="cmsTitulo" class="form-control" placeholder="Ej. Software Militares Alpha" required autocomplete="off"></div>
+                <div class="form-group"><label>Descripción del Sistema</label><textarea id="cmsDescripcion" class="form-control" rows="2" placeholder="Describa el alcance tecnológico..." required></textarea></div>
+                <button type="submit" class="btn-gold">Inyectar y Publicar en la Landing</button>
+            </form>
+            
+            <h4 style="font-family:'Cinzel'; margin-top:2rem; margin-bottom:1rem; color:var(--gold-primary);">Sistemas Publicados Actualmente</h4>
+            <div class="table-container">
+                <table>
+                    <thead><tr><th>ID</th><th>Sistema</th><th>Descripción</th><th>Acción</th></tr></thead>
+                    <tbody id="cmsTableBody"></tbody>
+                </table>
+            </div>
         </div>
-        <!-- Canvas de Gráfico Analítico Totalmente Saneado -->
-        <div class="chart-wrapper"><canvas id="trafficChart" style="width:100%; height:100%; max-height:320px;"></canvas></div>
-        <div class="search-container"><input type="text" id="searchInput" class="form-control" placeholder="Buscar por remitente, correo o país..." style="border-radius: 4px;"></div>
+
+        <div class="analytics-grid">
+            <div class="stat-card"><h4>Solicitudes (Hoy)</h4><div class="value" id="statHoy">0</div></div>
+            <div class="stat-card"><h4>Proyectos Acumulados</h4><div class="value" id="statTotal">0</div></div>
+        </div>
+        <div class="chart-wrapper"><canvas id="trafficChart"></canvas></div>
+        <div class="search-container"><input type="text" id="searchInput" class="form-control" placeholder="Buscar registros..."></div>
         <div class="table-container">
             <table>
-                <thead>
-                    <tr><th>Remitente</th><th>Contacto Electrónico</th><th>Teléfono</th><th>Inversión Proyectada</th><th>País Firma</th><th>Requerimiento Corporativo</th><th>Registro Fecha</th></tr>
-                </thead>
+                <thead><tr><th>Cliente</th><th>Email</th><th>Teléfono</th><th>Categoría</th><th>País</th><th>Alcance</th><th>Fecha</th></tr></thead>
                 <tbody id="mensajesTableBody"></tbody>
             </table>
         </div>
-        <div class="pagination-container">
-            <button class="nav-btn" id="prevPageBtn">Anterior</button>
-            <span id="pageIndicator" style="font-size:0.9rem; color:var(--text-muted)">Página 1 de 1</span>
-            <button class="nav-btn" id="nextPageBtn">Siguiente</button>
-        </div>
-    </div>
-
-    <div id="configView" class="hidden">
-        <section class="config-section" style="margin-top: 120px;">
-            <h2>Actualizar Firma Digital</h2>
-            <form id="updatePasswordForm">
-                <div class="form-group"><label>Clave Criptográfica Actual</label><input type="password" id="passwordActual" class="form-control" required></div>
-                <div class="form-group"><label>Nueva Clave Corporativa (Min 8 Caracteres)</label><input type="password" id="passwordNuevo" class="form-control" required></div>
-                <div style="display:flex; gap:1rem;"><button type="submit" class="btn-gold">Confirmar Nueva Firma</button><button type="button" class="nav-btn" id="backToDashBtn" style="width:40%;">Volver</button></div>
-            </form>
-        </section>
+        <div class="pagination-container"><button class="glass-btn" id="prevPageBtn">Anterior</button><span id="pageIndicator">Página 1</span><button class="glass-btn" id="nextPageBtn">Siguiente</button></div>
     </div>
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE C
-// SECCIÓN: SCRIPTS DEL CLIENTE - TEMPORIZADORES, INTERÉS COMPUESTO Y APIS ASÍNCRONAS
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 14
+// SECCIÓN: LÓGICA DE CONTROL JAVASCRIPT CLIENTE - ENRUTADOR VIRTUAL CMS
 // ============================================================================
 
     <script>
-        let paginaActual = 1;
-        let busquedaActual = '';
-        let usuarioEnProceso2FA = '';
-        let miGraficoInstancia = null;
-        let cuentaRegresivaInactividad;
-        let tiempoRestanteSesion = 15 * 60; 
+        let paginaActual = 1; let busquedaActual = ''; let usuarioEnProceso2FA = ''; let miGraficoInstancia = null; let cuentaRegresivaInactividad; let tiempoRestanteSesion = 15 * 60;
 
-        // Lógica del simulador de interés compuesto estructurado sin cuelgues
-        document.getElementById('btnCalcularSim').addEventListener('click', () => {
-            const monto = parseFloat(document.getElementById('simMonto').value);
-            const plazo = parseInt(document.getElementById('simPlazo').value);
-            const tasa = parseFloat(document.getElementById('simTasa').value);
-            if(isNaN(monto) || monto <= 0) { showToast('Por favor ingrese un capital de inversión válido.', 'error'); return; }
-            const resultadoCompuesto = monto * Math.pow((1 + tasa), plazo);
-            document.getElementById('simTotal').innerText = '$ ' + resultadoCompuesto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            document.getElementById('simResultado').style.display = 'block';
-            showToast('Proyección patrimonial calculada con éxito.', 'success');
-        });
+        function switchPublicSection(sectionId) {
+            document.querySelectorAll('.section-container').forEach(sec => sec.classList.remove('active'));
+            document.querySelectorAll('.nav-glass-container .nav-glass-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(sectionId).classList.add('active');
+            const map = { 'sec-inicio': 'nav-inicio', 'sec-productos': 'nav-productos', 'sec-nosotros': 'nav-nosotros', 'sec-contacto': 'nav-contacto' };
+            document.getElementById(map[sectionId]).classList.add('active');
+        }
 
         function iniciarTemporizadorSesion() {
-            clearInterval(cuentaRegresivaInactividad);
-            tiempoRestanteSesion = 15 * 60;
+            clearInterval(cuentaRegresivaInactividad); tiempoRestanteSesion = 15 * 60;
             cuentaRegresivaInactividad = setInterval(() => {
-                tiempoRestanteSesion--;
-                const minutos = Math.floor(tiempoRestanteSesion / 60);
-                const segundos = tiempoRestanteSesion % 60;
-                document.getElementById('sessionTimer').innerText = 'Sesión Segura: ' + (minutos < 10 ? '0' : '') + minutos + ':' + (segundos < 10 ? '0' : '') + segundos;
-                if (tiempoRestanteSesion <= 0) { clearInterval(cuentaRegresivaInactividad); ejecutarCierreSesionForzado(); }
+                tiempoRestanteSesion--; const mins = Math.floor(tiempoRestanteSesion / 60); const segs = tiempoRestanteSesion % 60;
+                document.getElementById('sessionTimer').innerText = 'Sesión: ' + (mins < 10 ? '0' : '') + mins + ':' + (segs < 10 ? '0' : '') + segs;
+                if (tiempoRestanteSesion <= 0) ejecutarCierreSesionForzado();
             }, 1000);
         }
 
-        function resetearTemporizadorPorActividad() { if (sessionStorage.getItem('mseptem_token')) { tiempoRestanteSesion = 15 * 60; } }
-        window.onload = () => { ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => document.addEventListener(evt, resetearTemporizadorPorActividad, true)); };
+        // Carga dinámica de productos en la Landing Pública desde Postgres
+        async function consultarCatalogoPublico() {
+            try {
+                const res = await fetch('/api/productos'); if(!res.ok) return;
+                const productos = await res.json();
+                const wrapper = document.getElementById('contenedorProductosPublicos');
+                wrapper.innerHTML = '';
+                if(productos.length === 0) {
+                    wrapper.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align:center;"><p style="color:var(--text-muted);">Catálogo en mantenimiento técnico.</p></div>';
+                } else {
+                    productos.forEach(p => {
+                        wrapper.innerHTML += '<div class="card"><h3>' + p.titulo + '</h3><p>' + p.descripcion + '</p></div>';
+                    });
+                }
+            } catch(e) {}
+        }
+        consultarCatalogoPublico();
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 15
+// SECCIÓN: GESTIONADORES ASÍCRONOS DEL PANEL CMS, CONTROLADOR CSV Y ARRIVAL DE PUERTOS
+// ============================================================================
 
-        const adminToggleBtn = document.getElementById('adminToggleBtn');
-        const publicView = document.getElementById('publicView');
-        const loginView = document.getElementById('loginView');
-        const twoFactorView = document.getElementById('twoFactorView');
-        const dashboardView = document.getElementById('dashboardView');
-        const configView = document.getElementById('configView');
-
-        document.getElementById('brandLogo').addEventListener('click', () => {
-            if(!sessionStorage.getItem('mseptem_token')) {
-                publicView.classList.remove('hidden'); loginView.classList.add('hidden');
-                twoFactorView.classList.add('hidden'); dashboardView.classList.add('hidden'); configView.classList.add('hidden');
-            }
-        });
-
-        adminToggleBtn.addEventListener('click', () => {
-            const token = sessionStorage.getItem('mseptem_token');
-            if(token) { cargarMensajesDashboard(); } 
-            else {
-                publicView.classList.add('hidden'); dashboardView.classList.add('hidden');
-                configView.classList.add('hidden'); twoFactorView.classList.add('hidden'); loginView.classList.remove('hidden');
-            }
-        });
-
-        document.getElementById('goConfigBtn').addEventListener('click', () => { dashboardView.classList.add('hidden'); configView.classList.remove('hidden'); });
-        document.getElementById('backToDashBtn').addEventListener('click', () => { configView.classList.add('hidden'); dashboardView.classList.remove('hidden'); });
-
-        let searchTimeout;
-        document.getElementById('searchInput').addEventListener('input', (e) => {
-            clearTimeout(searchTimeout);
-            busquedaActual = e.target.value.trim();
-            searchTimeout = setTimeout(() => { paginaActual = 1; cargarMensajesDashboard(); }, 400);
-        });
-
-        document.getElementById('prevPageBtn').addEventListener('click', () => { if (paginaActual > 1) { paginaActual--; cargarMensajesDashboard(); } });
-        document.getElementById('nextPageBtn').addEventListener('click', () => { paginaActual++; cargarMensajesDashboard(); });
-
-        async function renderizarGraficoMetricas() {
+        // Listar productos en la tabla del Panel Administrativo con botón Eliminar
+        async function sincronizarPanelCMS() {
             const token = sessionStorage.getItem('mseptem_token');
             try {
-                const response = await fetch('/api/admin/metricas', { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
-                if(!response.ok) return;
-                const datosMetricas = await response.json();
-                document.getElementById('statHoy').innerText = datosMetricas.resumen.hoy;
-                document.getElementById('statTotal').innerText = datosMetricas.resumen.total;
-                const etiquetasDias = datosMetricas.historico.map(r => r.dia);
-                const volumetriaDatos = datosMetricas.historico.map(r => parseInt(r.cantidad));
-                const ctx = document.getElementById('trafficChart').getContext('2d');
-                if (miGraficoInstancia) { miGraficoInstancia.destroy(); }
-                miGraficoInstancia = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: etiquetasDias.length ? etiquetasDias : ['Sin Datos'],
-                        datasets: [{
-                            label: 'Volumen de Requerimientos Institucionales',
-                            // Corrección analítica: operador ternario completamente balanceado
-                            data: volumetriaDatos.length ? volumetriaDatos : [],
-                            borderColor: '#D4AF37',
-                            backgroundColor: 'rgba(212, 175, 55, 0.05)',
-                            borderWidth: 2,
-                            tension: 0.3,
-                            fill: true
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: { legend: { labels: { color: '#E0E0E0', font: { family: 'Montserrat' } } } },
-                        scales: {
-                            x: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#A0A0A0' } },
-                            y: { grid: { color: 'rgba(212,175,55,0.05)' }, ticks: { color: '#A0A0A0', stepSize: 1 } }
-                        }
-                    }
+                const res = await fetch('/api/productos'); if(!res.ok) return;
+                const productos = await res.json();
+                const tbody = document.getElementById('cmsTableBody'); tbody.innerHTML = '';
+                productos.forEach(p => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td>' + p.id + '</td><td>' + p.titulo + '</td><td>' + p.descripcion + '</td><td><button class="glass-btn" style="border-color:#8b0000; color:#ff4444; padding:0.2rem 0.6rem;" onclick="eliminarProductoCMS(' + p.id + ')">Eliminar</button></td>';
+                    tbody.appendChild(tr);
                 });
-            } catch (err) { console.error('Error al pintar la analítica visual.'); }
+            } catch(e) {}
         }
 
+        // Agregar Producto Nuevo desde el Formulario CMS sin tocar código
+        document.getElementById('cmsForm').addEventListener('submit', async (e) => {
+            e.preventDefault(); const token = sessionStorage.getItem('mseptem_token');
+            const payload = { titulo: document.getElementById('cmsTitulo').value.trim(), descripcion: document.getElementById('cmsDescripcion').value.trim() };
+            try {
+                const res = await fetch('/api/admin/productos', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(payload) });
+                if(res.ok) { showToast('Sistema incorporado a la landing.', 'success'); document.getElementById('cmsForm').reset(); sincronizarPanelCMS(); consultarCatalogoPublico(); }
+            } catch(err) { showToast('Fallo de red.', 'error'); }
+        });
+
+        async function eliminarProductoCMS(id) {
+            const token = sessionStorage.getItem('mseptem_token');
+            try {
+                const res = await fetch('/api/admin/productos/' + id, { method: 'DELETE', headers: { 'Authorization': 'Bearer ' + token } });
+                if(res.ok) { showToast('Sistema purgado.', 'success'); sincronizarPanelCMS(); consultarCatalogoPublico(); }
+            } catch(e) {}
+        }
+
+        // Eventos Base de Sesión
         document.getElementById('contactForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const payload = {
-                nombre: document.getElementById('nombre').value.trim(),
-                email: document.getElementById('email').value.trim(),
-                telefono: document.getElementById('telefono').value.trim(),
-                monto_inversion: document.getElementById('montoInversion').value,
-                pais: document.getElementById('pais').value.trim(),
-                mensaje: document.getElementById('mensaje').value.trim()
-            };
-            const xssPattern = /<script[^>]*>([\s\S]*?)<\/script>|<[^>]+>/gi;
-            if (xssPattern.test(payload.nombre) || xssPattern.test(payload.mensaje) || xssPattern.test(payload.telefono)) { showToast('Patrón sintáctico prohibido detectado.', 'error'); return; }
+            const payload = { nombre: document.getElementById('nombre').value.trim(), email: document.getElementById('email').value.trim(), telefono: document.getElementById('telefono').value.trim(), monto_inversion: document.getElementById('montoInversion').value, pais: document.getElementById('pais').value.trim(), mensaje: document.getElementById('mensaje').value.trim() };
             try {
-                const response = await fetch('/api/contacto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                const data = await response.json();
-                if (response.ok) { showToast('Transmisión exitosa: ' + data.message, 'success'); document.getElementById('contactForm').reset(); } 
-                else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Fallo en la comunicación perimetral.', 'error'); }
+                const res = await fetch('/api/contacto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if(res.ok) { showToast('Requerimiento transmitido con éxito.', 'success'); document.getElementById('contactForm').reset(); }
+            } catch(err) {}
         });
 
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const payload = { usuario: document.getElementById('username').value.trim(), password: document.getElementById('password').value };
             try {
-                const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                const data = await response.json();
-                if (response.ok && data.status === '2fa_required') {
-                    usuarioEnProceso2FA = data.usuario;
-                    showToast(data.message, 'success');
-                    loginView.classList.add('hidden'); twoFactorView.classList.remove('hidden');
-                } else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Error en la pasarela de autenticación.', 'error'); }
+                const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data = await res.json();
+                if(res.ok && data.status === '2fa_required') { usuarioEnProceso2FA = data.usuario; showToast(data.message, 'success'); loginView.classList.add('hidden'); twoFactorView.classList.remove('hidden'); }
+            } catch(err) {}
         });
-// ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE D
-// SECCIÓN: PROTOCOLO MULTIFACTOR CLIENTE, EXPORTACIÓN DE REPORTES Y CIERRE DE RED
-// ============================================================================
 
         document.getElementById('twoFactorForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const payload = { usuario: usuarioEnProceso2FA, pin: document.getElementById('pinInput').value.trim() };
             try {
-                const response = await fetch('/api/auth/verificar-2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                const data = await response.json();
-                if (response.ok) {
-                    sessionStorage.setItem('mseptem_token', data.token);
-                    showToast('Firma validada. Concediendo acceso...', 'success');
-                    document.getElementById('twoFactorForm').reset();
-                    twoFactorView.classList.add('hidden');
-                    cargarMensajesDashboard();
-                    iniciarTemporizadorSesion(); 
-                } else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Fallo crítico en factor de doble verificación.', 'error'); }
-        });
-
-        document.getElementById('updatePasswordForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const token = sessionStorage.getItem('mseptem_token');
-            const payload = { passwordActual: document.getElementById('passwordActual').value, passwordNuevo: document.getElementById('passwordNuevo').value };
-            try {
-                const response = await fetch('/api/admin/update-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(payload) });
-                const data = await response.json();
-                if (response.ok) { showToast('Firma actualizada. Autentíquese nuevamente.', 'success'); ejecutarCierreSesionForzado(); } 
-                else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Error al reestructurar firma criptográfica.', 'error'); }
+                const res = await fetch('/api/auth/verificar-2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                const data = await res.json();
+                if(res.ok) { sessionStorage.setItem('mseptem_token', data.token); showToast('Firma validada.', 'success'); twoFactorView.classList.add('hidden'); cargarMensajesDashboard(); iniciarTemporizadorSesion(); sincronizarPanelCMS(); }
+            } catch(err) {}
         });
 
         async function cargarMensajesDashboard() {
             const token = sessionStorage.getItem('mseptem_token');
             try {
-                const response = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=\${paginaActual}&limit=5\`, { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
-                if(response.ok) {
-                    const resJson = await response.json();
-                    const mensajes = resJson.data;
-                    const pag = resJson.pagination;
-                    const tbody = document.getElementById('mensajesTableBody');
-                    tbody.innerHTML = '';
-                    if(mensajes.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No hay comunicaciones entrantes en el registro corporativo.</td></tr>'; } 
+                const res = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=\${paginaActual}&limit=5\`, { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
+                if(res.ok) {
+                    const json = await res.json(); const tbody = document.getElementById('mensajesTableBody'); tbody.innerHTML = '';
+                    if(json.data.length === 0) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Sin registros en cola.</td></tr>'; }
                     else {
-                        mensajes.forEach(m => {
+                        json.data.forEach(m => {
                             const tr = document.createElement('tr');
-                            const rangosMonto = { tier_1: '\$250K - \$1M', tier_2: '\$1M - \$5M', tier_3: '\$5M+' };
-                            const inversionFormateada = rangosMonto[m.monto_inversion] || m.monto_inversion;
-                            // Corrección de comillas simples internas en inyección asíncrona de celdas
-                            tr.innerHTML = "<td>" + m.nombre + "</td><td>" + m.email + "</td><td>" + m.telefono + "</td><td style='color:var(--gold-primary); font-weight:600;'>" + inversionFormateada + "</td><td>" + m.pais + "</td><td>" + m.mensaje + "</td><td>" + new Date(m.fecha).toLocaleString() + "</td>";
+                            tr.innerHTML = '<td>' + m.nombre + '</td><td>' + m.email + '</td><td>' + m.telefono + '</td><td>' + m.monto_inversion + '</td><td>' + m.pais + '</td><td>' + m.mensaje + '</td><td>' + new Date(m.fecha).toLocaleString() + '</td>';
                             tbody.appendChild(tr);
                         });
                     }
-                    document.getElementById('pageIndicator').innerText = \`Página \${pag.page} de \${pag.totalPaginas || 1}\`;
-                    document.getElementById('prevPageBtn').disabled = pag.page <= 1;
-                    document.getElementById('nextPageBtn').disabled = pag.page >= pag.totalPaginas;
-                    publicView.classList.add('hidden'); loginView.classList.add('hidden'); configView.classList.add('hidden'); twoFactorView.classList.add('hidden');
-                    dashboardView.classList.remove('hidden');
-                    renderizarGraficoMetricas();
-                } else { ejecutarCierreSesionForzado(); showToast('Sesión inválida o expirada.', 'error'); }
-            } catch (error) { showToast('Fallo al sincronizar consola corporativa.', 'error'); }
-        }
-
-        document.getElementById('exportCsvBtn').addEventListener('click', async () => {
-            const token = sessionStorage.getItem('mseptem_token');
-            try {
-                const response = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=1&limit=1000\`, { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
-                if(response.ok) {
-                    const resJson = await response.json();
-                    const mensajes = resJson.data;
-                    if(mensajes.length === 0) { showToast('No existen registros para exportar.', 'error'); return; }
-                    let csvContent = "\\uFEFF";
-                    csvContent += "ID,Remitente,Contacto,Telefono,Rango Inversion,Pais,Requerimiento,Fecha\\n";
-                    mensajes.forEach(m => { csvContent += \`\${m.id},"\${m.nombre}","\${m.email}","\${m.telefono}","\${m.monto_inversion}","\${m.pais}","\${m.mensaje}","\${new Date(m.fecha).toLocaleString()}"\\n\`; });
-                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement("a");
-                    link.setAttribute("href", url); link.setAttribute("download", \`MSEPTEM_AUDIT_\${new Date().toISOString().slice(0,10)}.csv\`);
-                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    publicView.classList.add('hidden'); loginView.classList.add('hidden'); twoFactorView.classList.add('hidden'); dashboardView.classList.remove('hidden');
                 }
-            } catch (error) { showToast('Error de empaquetado al exportar la bitácora.', 'error'); }
-        });
-
-        function ejecutarCierreSesionForzado() {
-            clearInterval(cuentaRegresivaInactividad);
-            sessionStorage.removeItem('mseptem_token');
-            dashboardView.classList.add('hidden'); configView.classList.add('hidden'); publicView.classList.remove('hidden');
-            showToast('Consola de administración cerrada de forma segura.', 'success');
+            } catch(err) {}
         }
 
+        function ejecutarCierreSesionForzado() { clearInterval(cuentaRegresivaInactividad); sessionStorage.removeItem('mseptem_token'); dashboardView.classList.add('hidden'); publicView.classList.remove('hidden'); showToast('Consola cerrada.', 'success'); }
         document.getElementById('logoutBtn').addEventListener('click', ejecutarCierreSesionForzado);
     </script>
 </body>
@@ -789,5 +699,5 @@ app.get('/', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`[SEGURIDAD] Servidor MSEPTEM activo y enlazado en puerto \${PORT}`);
+    console.log(`[SEGURIDAD] Servidor MSEPTEM activo en puerto \${PORT}`);
 });
