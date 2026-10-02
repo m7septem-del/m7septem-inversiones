@@ -1,0 +1,22 @@
+{
+  "name": "mseptem-inversiones",
+  "version": "1.0.0",
+  "description": "Ecosistema Corporativo de Inversión con PostgreSQL, JWT, 2FA y Analíticas",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "private": true
+}
