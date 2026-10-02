@@ -2,7 +2,7 @@
 // ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 1
 // EMPRESA: MSEPTEM Inversiones
 // ESTÁNDAR: Ciberseguridad Avanzada (OWASP Top 10) & Estética Obsidian & Gold
-// COMPONENTES: Control de Entorno, Almacenes de Seguridad de IP y Logger de Auditoría
+// COMPONENTES: Diagnóstico de Infraestructura y Capa Perimetral de Seguridad
 // ============================================================================
 
 const express = require('express');
@@ -15,11 +15,11 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuración de variables de entorno para despliegue perimetral seguro
+// Variables de entorno corporativas para entornos productivos distribuidos
 const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://usuario:password@localhost:5432/mseptem_db';
 const JWT_SECRET = process.env.JWT_SECRET || 'MSEPTEM_ULTRA_SECRET_KEY_2026_#X9';
 
-// Conexión real a PostgreSQL con pasarela SSL adaptada para entornos en la nube
+// Configuración del Pool físico a PostgreSQL con SSL para proveedores en la nube
 const pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
@@ -35,7 +35,7 @@ const ipsBloqueadas = new Map();    // Lista negra temporal de IPs restringidas
 // ----------------------------------------------------------------------------
 function registrarEventoAuditoria(evento, ip, usuario = 'ANÓNIMO', detalles = '') {
     const marcaTiempo = new Date().toISOString();
-    console.log(`[AUDITORÍA][${marcaTiempo}][IP: ${ip}][OPERADOR: ${usuario}] ACCIÓN: ${evento} | ${detalles}`);
+    console.log(`[AUDITORÍA][\${marcaTiempo}][IP: \${ip}][OPERADOR: \${usuario}] ACCIÓN: \${evento} | \${detalles}`);
 }
 // ============================================================================
 // ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 2
@@ -57,7 +57,7 @@ async function verificarSaludBaseDatos() {
         const tablasExistentes = res.rows.map(r => r.table_name);
         
         if (!tablasExistentes.includes('contactos') || !tablasExistentes.includes('administradores')) {
-            console.warn('[ADVERTENCIA] Esquema incompleto. Inyecte las estructuras de database.sql.');
+            console.warn('[ADVERTENCIA] Esquema incompleto. Inyecte la base de datos estructural.');
         } else {
             console.log('[OK] Esquema físico verificado: Estructuras corporativas en línea.');
         }
@@ -70,10 +70,7 @@ async function verificarSaludBaseDatos() {
 }
 verificarSaludBaseDatos();
 
-// ----------------------------------------------------------------------------
-// MIDDLEWARES DE PROTECCIÓN PERIMETRAL CONTRA FUERZA BRUTA E INYECCIONES
-// ----------------------------------------------------------------------------
-
+// Middleware para validar si la dirección IP se encuentra en lista negra temporal
 app.use((req, res, next) => {
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const tiempoBloqueo = ipsBloqueadas.get(ipCliente);
@@ -109,7 +106,7 @@ app.use(express.json({ limit: '10kb' }));
 // ============================================================================
 
 app.use((req, res, next) => {
-    const sqlXssRegex = /(UNION|SELECT|INSERT|DELETE|UPDATE|DROP|ALTER|\x00|--|script|<[^>]+>)/gi;
+    const sqlXssRegex = /(UNION|SELECT|INSERT|DELETE|UPDATE|DROP|ALTER|\\x00|--|script|<[^>]+>)/gi;
     const sanitize = (input) => {
         if (typeof input === 'string') return input.replace(sqlXssRegex, '[REDACTED]').trim();
         if (typeof input === 'object' && input !== null) {
@@ -134,7 +131,7 @@ app.use('/api/', apiLimiter);
 
 const verificarToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+    const token = authHeader && authHeader.split(' ');
 
     if (!token) return res.status(401).json({ error: 'Acceso denegado. Token no proporcionado.' });
 
@@ -150,13 +147,12 @@ const verificarToken = (req, res, next) => {
 // SECCIÓN: ENDPOINTS PÚBLICOS - REGISTRO DE LEADS E INICIO DE AUTENTICACIÓN
 // ============================================================================
 
-// 1. Inserción parametrizada con los nuevos campos de auditoría institucional
 app.post('/api/contacto', async (req, res) => {
     const { nombre, email, telefono, monto_inversion, pais, mensaje } = req.body;
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
 
     if (!nombre || !email || !telefono || !monto_inversion || !pais || !mensaje || !email.includes('@')) {
-        registrarEventoAuditoria('INTENTO_CONTACTO_FALLIDO', ipCliente, 'ANÓNIMO', `Estructura inválida o incompleta enviada.`);
+        registrarEventoAuditoria('INTENTO_CONTACTO_FALLIDO', ipCliente, 'ANÓNIMO', 'Estructura inválida o incompleta enviada.');
         return res.status(400).json({ error: 'Todos los campos institucionales son de carácter obligatorio.' });
     }
 
@@ -165,12 +161,10 @@ app.post('/api/contacto', async (req, res) => {
         await pool.query(query, [nombre, email, telefono, monto_inversion, pais, mensaje]);
         return res.status(200).json({ status: 'success', message: 'Datos corporativos resguardados en el historial de la firma.' });
     } catch (error) {
-        console.error(error);
         return res.status(500).json({ error: 'Fallo general de persistencia en infraestructura.' });
     }
 });
 
-// 2. Control criptográfico de Login con bloqueo temporal de IP por fuerza bruta
 app.post('/api/auth/login', async (req, res) => {
     const { usuario, password } = req.body;
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -184,7 +178,7 @@ app.post('/api/auth/login', async (req, res) => {
             fallos++;
             intentosLoginIP.set(ipCliente, fallos);
             if (fallos >= 5) {
-                ipsBloqueadas.set(ipCliente, Date.now() + 15 * 60 * 1000); // 15 minutos
+                ipsBloqueadas.set(ipCliente, Date.now() + 15 * 60 * 1000);
                 registrarEventoAuditoria('IP_BLOQUEADA_FUERZA_BRUTA', ipCliente, usuario, 'Se han registrado 5 fallos consecutivos de login.');
                 return true;
             }
@@ -209,7 +203,7 @@ app.post('/api/auth/login', async (req, res) => {
         const pin2FA = Math.floor(100000 + Math.random() * 900000).toString();
         almacénPines2FA.set(admin.usuario, { pin: pin2FA, adminId: admin.id, expiracion: Date.now() + 120000 });
 
-        registrarEventoAuditoria('TOKEN_2FA_GENERADO', ipCliente, admin.usuario, `PIN temporal asignado: ${pin2FA} (Validez de 120s)`);
+        registrarEventoAuditoria('TOKEN_2FA_GENERADO', ipCliente, admin.usuario, `PIN temporal asignado: \${pin2FA} (Validez de 120s)`);
 
         return res.status(200).json({ 
             status: '2fa_required', 
@@ -225,7 +219,6 @@ app.post('/api/auth/login', async (req, res) => {
 // SECCIÓN: ENDPOINTS PROTEGIDOS POR JWT - CONTROL DE ACCESO INTERNO Y ANALÍTICAS
 // ============================================================================
 
-// 3. Fase Multifactor Estricta
 app.post('/api/auth/verificar-2fa', async (req, res) => {
     const { usuario, pin } = req.body;
     const ipCliente = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -242,11 +235,10 @@ app.post('/api/auth/verificar-2fa', async (req, res) => {
     return res.status(200).json({ status: 'success', token });
 });
 
-// 4. Modificación de Claves Corporativas
 app.post('/api/admin/update-password', verificarToken, async (req, res) => {
     const { passwordActual, passwordNuevo } = req.body;
     try {
-        const queryBusqueda = 'SELECT * FROM administradores WHERE id = $1';
+        const queryBusqueda = 'SELECT * FROM administradores WHERE id = \$1';
         const resultBusqueda = await pool.query(queryBusqueda, [req.adminId]);
         const admin = resultBusqueda.rows[0];
         const validacionActual = await bcrypt.compare(passwordActual, admin.password_hash);
@@ -254,12 +246,11 @@ app.post('/api/admin/update-password', verificarToken, async (req, res) => {
         if (!validacionActual) return res.status(401).json({ error: 'La verificación de la clave actual ha fallado.' });
 
         const nuevoHash = await bcrypt.hash(passwordNuevo, 10);
-        await pool.query('UPDATE administradores SET password_hash = $1 WHERE id = $2', [nuevoHash, req.adminId]);
+        await pool.query('UPDATE administradores SET password_hash = \$1 WHERE id = \$2', [nuevoHash, req.adminId]);
         return res.status(200).json({ status: 'success', message: 'Firma digital corporativa reestructurada.' });
     } catch (error) { return res.status(500).json({ error: 'Error del motor al reescribir hashes.' }); }
 });
 
-// 5. Endpoint del Panel Analítico Avanzado: Resumen Volumétrico e Históricos
 app.get('/api/admin/metricas', verificarToken, async (req, res) => {
     try {
         const queryMetricas = "SELECT TO_CHAR(fecha, 'YYYY-MM-DD') as dia, COUNT(*) as cantidad FROM contactos GROUP BY dia ORDER BY dia ASC LIMIT 7;";
@@ -290,12 +281,12 @@ app.get('/api/admin/mensajes', verificarToken, async (req, res) => {
 
         if (search) {
             const searchParam = `%\${search}%`;
-            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos WHERE nombre ILIKE $1 OR email ILIKE $1 OR pais ILIKE $1 ORDER BY fecha DESC LIMIT $2 OFFSET $3';
+            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos WHERE nombre ILIKE \$1 OR email ILIKE \$1 OR pais ILIKE \$1 ORDER BY fecha DESC LIMIT \$2 OFFSET \$3';
             paramsData = [searchParam, limit, offset];
-            queryCount = 'SELECT COUNT(*) FROM contactos WHERE nombre ILIKE $1 OR email ILIKE $1 OR pais ILIKE $1';
+            queryCount = 'SELECT COUNT(*) FROM contactos WHERE nombre ILIKE \$1 OR email ILIKE \$1 OR pais ILIKE \$1';
             paramsCount = [searchParam];
         } else {
-            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos ORDER BY fecha DESC LIMIT $1 OFFSET $2';
+            queryData = 'SELECT id, nombre, email, telefono, monto_inversion, pais, mensaje, fecha FROM contactos ORDER BY fecha DESC LIMIT \$1 OFFSET \$2';
             paramsData = [limit, offset];
             queryCount = 'SELECT COUNT(*) FROM contactos';
             paramsCount = [];
@@ -341,61 +332,46 @@ app.get('/', (req, res) => {
         .logo { font-family: 'Cinzel', serif; font-size: 1.5rem; font-weight: 700; color: var(--gold-primary); letter-spacing: 2px; }
         .nav-btn { background: none; border: 1px solid var(--border-gold); color: var(--gold-primary); padding: 0.5rem 1rem; cursor: pointer; font-family: 'Montserrat', sans-serif; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; transition: var(--transition); }
         .nav-btn:hover { background-color: var(--gold-primary); color: var(--obsidian-deep); }
-// ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 7
-// SECCIÓN: DISEÑO DE GRILLAS COMPLEMENTARIAS, CONFIGURACIONES GRÁFICAS Y CDN
-// ============================================================================
-
         .hero { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 0 1rem; background: radial-gradient(circle at center, #1e1b13 0%, var(--obsidian-deep) 70%); margin-top: 60px; }
         .hero h1 { font-family: 'Cinzel', serif; font-size: 3.5rem; color: var(--gold-primary); margin-bottom: 1rem; letter-spacing: 4px; }
         .hero p { font-size: 1.1rem; max-width: 600px; color: var(--text-muted); margin-bottom: 2.5rem; font-weight: 300; }
-
         .grid-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; width: 90%; max-width: 1200px; margin: -4rem auto 4rem auto; }
         .card { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2.5rem 2rem; border-radius: 4px; transition: var(--transition); }
         .card:hover { transform: translateY(-5px); border-color: var(--gold-primary); box-shadow: 0 10px 30px rgba(212, 175, 55, 0.1); }
         .card h3 { font-family: 'Cinzel', serif; color: var(--gold-primary); margin-bottom: 1rem; }
-
         .analytics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; width: 100%; }
         .stat-card { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 1.5rem; border-radius: 4px; text-align: center; }
         .stat-card h4 { font-family: 'Cinzel', serif; color: var(--gold-primary); font-size: 0.85rem; text-transform: uppercase; margin-bottom: 0.5rem; letter-spacing: 1px; }
         .stat-card .value { font-size: 2rem; font-weight: 600; color: var(--text-light); }
-
         .form-section, .admin-section, .config-section { background-color: var(--obsidian-surface); max-width: 550px; margin: 4rem auto; padding: 3rem; border-radius: 4px; border: 1px solid var(--border-gold); }
         .form-section h2, .admin-section h2, .config-section h2 { font-family: 'Cinzel', serif; color: var(--gold-primary); margin-bottom: 1.5rem; text-align: center; letter-spacing: 1px; }
-        
         .form-group { margin-bottom: 1.5rem; }
         .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; }
         .form-control { width: 100%; background-color: var(--obsidian-elevated); border: 1px solid var(--border-gold); color: var(--text-light); padding: 0.85rem; font-family: 'Montserrat', sans-serif; border-radius: 2px; transition: var(--transition); }
         .form-control:focus { outline: none; border-color: var(--gold-primary); box-shadow: 0 0 5px rgba(212, 175, 55, 0.3); }
-        
         .btn-gold { width: 100%; background: linear-gradient(135deg, #b8860b 0%, var(--gold-primary) 100%); color: var(--obsidian-deep); border: none; padding: 1rem; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; cursor: pointer; transition: var(--transition); }
         .btn-gold:hover { background: linear-gradient(135deg, var(--gold-primary) 0%, #f3e5ab 100%); box-shadow: 0 0 15px rgba(212, 175, 55, 0.4); }
-        
         .hidden { display: none !important; }
         .dashboard-view { max-width: 1200px; margin: 100px auto 4rem auto; padding: 0 2rem; }
         .chart-wrapper { background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); padding: 2rem; border-radius: 4px; margin-bottom: 2rem; width: 100%; max-height: 400px; }
-        
         .search-container { margin-bottom: 1.5rem; display: flex; width: 100%; max-width: 400px; }
         .pagination-container { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; padding: 1rem 0; }
-        
         .table-container { width: 100%; overflow-x: auto; background-color: var(--obsidian-surface); border: 1px solid var(--border-gold); border-radius: 4px; }
         table { width: 100%; border-collapse: collapse; text-align: left; }
         th, td { padding: 1rem 1.5rem; border-bottom: 1px solid rgba(212, 175, 55, 0.1); }
         th { background-color: var(--obsidian-elevated); color: var(--gold-primary); font-family: 'Cinzel', serif; font-size: 0.9rem; }
         tr:hover { background-color: rgba(212, 175, 55, 0.02); }
-        
         .toast-container { position: fixed; bottom: 2rem; right: 2rem; z-index: 9999; display: flex; flex-direction: column; gap: 1rem; }
         .toast { background-color: var(--obsidian-surface); border-left: 4px solid var(--gold-primary); color: var(--text-light); padding: 1rem 1.5rem; border-radius: 4px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); min-width: 300px; animation: slideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         .toast.error { border-left-color: #8b0000; }
-        
         @keyframes slideIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
         @keyframes fadeOut { to { opacity: 0; transform: translateY(-10px); } }
     </style>
     <script src="https://cloudflare.com"></script>
 </head>
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 8
-// SECCIÓN: CUERPO DEL DOM - ESTRUCTURACIÓN DE FORMULARIOS AMPLIADOS Y VISTAS 2FA
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 7
+// SECCIÓN: MAQUETACIÓN ESTRUCTURAL DE FORMULARIOS AMPLIADOS Y DASHBOARD ANALÍTICO
 // ============================================================================
 
 <body>
@@ -417,7 +393,6 @@ app.get('/', (req, res) => {
             <div class="card"><h3>Corporate Security</h3><p>Estructuras tecnológicas y operativas blindadas para transacciones corporativas de alta confianza.</p></div>
         </div>
 
-        <!-- Módulo del Simulador Financiero Institucional -->
         <section class="form-section" style="max-width: 700px; margin: 2rem auto;">
             <h2>Simulador de Capital Alternativo</h2>
             <div class="form-group">
@@ -445,7 +420,6 @@ app.get('/', (req, res) => {
             </div>
         </section>
 
-        <!-- Formulario Ampliado de Captación Corporativa -->
         <section class="form-section">
             <h2>Contacto Institucional</h2>
             <form id="contactForm">
@@ -468,7 +442,6 @@ app.get('/', (req, res) => {
         </section>
     </div>
 
-    <!-- PORTAL DE ACCESO (FASE 1: CREDENCIALES) -->
     <div id="loginView" class="hidden">
         <section class="admin-section" style="margin-top: 120px;">
             <h2>Autenticación de Firma</h2>
@@ -480,7 +453,6 @@ app.get('/', (req, res) => {
         </section>
     </div>
 
-    <!-- PORTAL DE ACCESO (FASE 2: MULTIFACTOR 2FA VERIFICATION) -->
     <div id="twoFactorView" class="hidden">
         <section class="admin-section" style="margin-top: 120px;">
             <h2>Verificación Perimetral 2FA</h2>
@@ -493,12 +465,7 @@ app.get('/', (req, res) => {
             </form>
         </section>
     </div>
-// ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 9
-// SECCIÓN: CONSOLA DE GESTIÓN OPERATIVA - LOGOUT POR INACTIVIDAD Y BUSCADOR DESCRIPTIVO
-// ============================================================================
 
-    <!-- CONSOLA DE GESTIÓN INTERNA (DASHBOARD REAL-TIME MULTICOLUMNA) -->
     <div id="dashboardView" class="hidden dashboard-view" style="margin-top:120px; padding: 0 5%;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;">
             <h2 style="font-family:'Cinzel'; color:var(--gold-primary);">Consola de Comunicaciones</h2>
@@ -509,27 +476,16 @@ app.get('/', (req, res) => {
                 <button class="nav-btn" id="logoutBtn" style="border-color:#8b0000; color:#ff4444;">Cerrar Consola</button>
             </div>
         </div>
-
         <div class="analytics-grid">
             <div class="stat-card"><h4>Comunicaciones Recibidas (Hoy)</h4><div class="value" id="statHoy">0</div></div>
             <div class="stat-card"><h4>Historial Acumulado Total</h4><div class="value" id="statTotal">0</div></div>
         </div>
-
-        <div class="chart-wrapper"><canvas id="trafficChart" style="width:100%; height:100%; max-height:320px;"></canvas></div>
-        
+        <div class="chart-wrapper"><canvas id="trafficChart" style="width:100%; height:100%; max-height:320px CONTAINER;"></canvas></div>
         <div class="search-container"><input type="text" id="searchInput" class="form-control" placeholder="Buscar por remitente, correo o país..." style="border-radius: 4px;"></div>
         <div class="table-container">
             <table>
                 <thead>
-                    <tr>
-                        <th>Remitente</th>
-                        <th>Contacto Electrónico</th>
-                        <th>Teléfono</th>
-                        <th>Inversión Proyectada</th>
-                        <th>País Firma</th>
-                        <th>Requerimiento Corporativo</th>
-                        <th>Registro Fecha</th>
-                    </tr>
+                    <tr><th>Remitente</th><th>Contacto Electrónico</th><th>Teléfono</th><th>Inversión Proyectada</th><th>País Firma</th><th>Requerimiento Corporativo</th><th>Registro Fecha</th></tr>
                 </thead>
                 <tbody id="mensajesTableBody"></tbody>
             </table>
@@ -551,6 +507,10 @@ app.get('/', (req, res) => {
             </form>
         </section>
     </div>
+// ============================================================================
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 8
+// SECCIÓN: RENDERIZADO ANALÍTICO DE MÉTRICAS, TEMPORIZADOR Y ARRANQUE EXPRESS
+// ============================================================================
 
     <script>
         let paginaActual = 1;
@@ -560,14 +520,16 @@ app.get('/', (req, res) => {
         let cuentaRegresivaInactividad;
         let tiempoRestanteSesion = 15 * 60; 
 
-        function showToast(message, type = 'success') {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            toast.className = 'toast ' + type;
-            toast.innerHTML = '<span>' + message + '</span>';
-            container.appendChild(toast);
-            setTimeout(() => { toast.style.animation = 'fadeOut 0.4s ease forwards'; setTimeout(() => toast.remove(), 400); }, 4000);
-        }
+        document.getElementById('btnCalcularSim').addEventListener('click', () => {
+            const monto = parseFloat(document.getElementById('simMonto').value);
+            const plazo = parseInt(document.getElementById('simPlazo').value);
+            const tasa = parseFloat(document.getElementById('simTasa').value);
+            if(isNaN(monto) || monto <= 0) { showToast('Por favor ingrese un capital de inversión válido.', 'error'); return; }
+            const resultadoCompuesto = monto * Math.pow((1 + tasa), plazo);
+            document.getElementById('simTotal').innerText = '$ ' + resultadoCompuesto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            document.getElementById('simResultado').style.display = 'block';
+            showToast('Proyección patrimonial calculada con éxito.', 'success');
+        });
 
         function iniciarTemporizadorSesion() {
             clearInterval(cuentaRegresivaInactividad);
@@ -582,7 +544,6 @@ app.get('/', (req, res) => {
         }
 
         function resetearTemporizadorPorActividad() { if (sessionStorage.getItem('mseptem_token')) { tiempoRestanteSesion = 15 * 60; } }
-
         window.onload = () => { ['click', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => document.addEventListener(evt, resetearTemporizadorPorActividad, true)); };
 
         const adminToggleBtn = document.getElementById('adminToggleBtn');
@@ -620,23 +581,6 @@ app.get('/', (req, res) => {
 
         document.getElementById('prevPageBtn').addEventListener('click', () => { if (paginaActual > 1) { paginaActual--; cargarMensajesDashboard(); } });
         document.getElementById('nextPageBtn').addEventListener('click', () => { paginaActual++; cargarMensajesDashboard(); });
-// ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 10
-// SECCIÓN: ENTRADAS DE ACCIÓN DEL CLIENTE, EXPORTADOR COMPLETO Y CONTROL DE PUERTOS
-// ============================================================================
-
-        document.getElementById('btnCalcularSim').addEventListener('click', () => {
-            const monto = parseFloat(document.getElementById('simMonto').value);
-            const plazo = parseInt(document.getElementById('simPlazo').value);
-            const tasa = parseFloat(document.getElementById('simTasa').value);
-
-            if(isNaN(monto) || monto <= 0) { showToast('Por favor ingrese un capital de inversión válido.', 'error'); return; }
-            const resultadoCompuesto = monto * Math.pow((1 + tasa), plazo);
-            
-            document.getElementById('simTotal').innerText = '$ ' + resultadoCompuesto.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            document.getElementById('simResultado').style.display = 'block';
-            showToast('Proyección patrimonial calculada con éxito.', 'success');
-        });
 
         async function renderizarGraficoMetricas() {
             const token = sessionStorage.getItem('mseptem_token');
@@ -644,15 +588,12 @@ app.get('/', (req, res) => {
                 const response = await fetch('/api/admin/metricas', { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
                 if(!response.ok) return;
                 const datosMetricas = await response.json();
-                
                 document.getElementById('statHoy').innerText = datosMetricas.resumen.hoy;
                 document.getElementById('statTotal').innerText = datosMetricas.resumen.total;
-
                 const etiquetasDias = datosMetricas.historico.map(r => r.dia);
                 const volumetriaDatos = datosMetricas.historico.map(r => parseInt(r.cantidad));
                 const ctx = document.getElementById('trafficChart').getContext('2d');
                 if (miGraficoInstancia) { miGraficoInstancia.destroy(); }
-                
                 miGraficoInstancia = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -690,12 +631,8 @@ app.get('/', (req, res) => {
                 pais: document.getElementById('pais').value.trim(),
                 mensaje: document.getElementById('mensaje').value.trim()
             };
-
             const xssPattern = /<script[^>]*>([\s\S]*?)<\/script>|<[^>]+>/gi;
-            if (xssPattern.test(payload.nombre) || xssPattern.test(payload.mensaje) || xssPattern.test(payload.telefono)) {
-                showToast('Patrón sintáctico prohibido detectado.', 'error'); return;
-            }
-
+            if (xssPattern.test(payload.nombre) || xssPattern.test(payload.mensaje) || xssPattern.test(payload.telefono)) { showToast('Patrón sintáctico prohibido detectado.', 'error'); return; }
             try {
                 const response = await fetch('/api/contacto', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                 const data = await response.json();
@@ -726,121 +663,144 @@ app.get('/', (req, res) => {
                 const data = await response.json();
                 if (response.ok) {
                     sessionStorage.setItem('mseptem_token', data.token);
-                    showToast('Firma validada. Concediendo acceso...', 'success');
-                    document.getElementById('twoFactorForm').reset();
-                    twoFactorView.classList.add('hidden');
-                    cargarMensajesDashboard();
-                    iniciarTemporizadorSesion(); 
-                } else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Fallo crítico en factor de doble verificación.', 'error'); }
-        });
-
-        document.getElementById('updatePasswordForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const token = sessionStorage.getItem('mseptem_token');
-            const payload = { passwordActual: document.getElementById('passwordActual').value, passwordNuevo: document.getElementById('passwordNuevo').value };
-            try {
-                const response = await fetch('/api/admin/update-password', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: JSON.stringify(payload) });
-                const data = await response.json();
-                if (response.ok) { showToast('Firma actualizada. Autentíquese nuevamente.', 'success'); ejecutarCierreSesionForzado(); } 
-                else { showToast('Error: ' + data.error, 'error'); }
-            } catch (error) { showToast('Error al reestructurar firma criptográfica.', 'error'); }
-        });
-
-        async function cargarMensajesDashboard() {
-            const token = sessionStorage.getItem('mseptem_token');
-            try {
-                const response = await fetch(`/api/admin/mensajes?search=${busquedaActual}&page=${paginaActual}&limit=5`, { method: 'GET', headers: { 'Authorization': 'Bearer ' + token } });
-                if(response.ok) {
-                    const resJson = await response.json();
-                    const mensajes = resJson.data;
-                    const pag = resJson.pagination;
-                    const tbody = document.getElementById('mensajesTableBody');
-                    tbody.innerHTML = '';
-                    
-                    if(mensajes.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No hay comunicaciones entrantes.</td></tr>';
-                    } else {
-                        mensajes.forEach(m => {
-                            const tr = document.createElement('tr');
-                            const rangosMonto = { tier_1: '$250K - $1M', tier_2: '$1M - $5M', tier_3: '$5M+' };
-                            const inversionFormateada = rangosMonto[m.monto_inversion] || m.monto_inversion;
-                            tr.innerHTML = `<td>${m.nombre}</td><td>${m.email}</td><td>${m.telefono}</td><td style="color:var(--gold-primary); font-weight:600;">${inversionFormateada}</td><td>${m.pais}</td><td>${m.mensaje}</td><td>${new Date(m.fecha).toLocaleString()}</td>`;
-                            tbody.appendChild(tr);
-                        });
-                    }
-                    document.getElementById('pageIndicator').innerText = `Página ${pag.page} de ${pag.totalPaginas || 1}`;
-                    document.getElementById('prevPageBtn').disabled = pag.page <= 1;
-                    document.getElementById('nextPageBtn').disabled = pag.page >= pag.totalPaginas;
-
 // ============================================================================
-// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 10
-// SECCIÓN: CONEXIONES FINALES DEL CLIENTE, EXPORTADOR COMPLETO Y CONTROL DE PUERTOS
+// ARCHIVO COMPLETO: server.js (Node.js + Express + PostgreSQL + JWT) - PARTE 8
+// SECCIÓN: COMPORTAMIENTO INTERACTIVO CLIENTE, EXPORTACIÓN Y ESCUCHA ACTIVADA
 // ============================================================================
 
-                    publicView.classList.add('hidden'); 
-                    loginView.classList.add('hidden'); 
-                    configView.classList.add('hidden'); 
-                    twoFactorView.classList.add('hidden');
-                    dashboardView.classList.remove('hidden');
-                    
-                    renderizarGraficoMetricas();
-                } else { 
-                    ejecutarCierreSesionForzado(); 
-                    showToast('Sesión inválida.', 'error'); 
-                }
-            } catch (error) { 
-                showToast('Fallo al sincronizar consola.', 'error'); 
+                showToast('Firma validada. Concediendo acceso...', 'success');
+                document.getElementById('twoFactorForm').reset();
+                twoFactorView.classList.add('hidden');
+                cargarMensajesDashboard();
+                iniciarTemporizadorSesion();
+            } else { 
+                showToast('Error: ' + data.error, 'error'); 
             }
+        } catch (error) { 
+            showToast('Fallo crítico en factor de doble verificación.', 'error'); 
         }
+    });
 
-        // Descarga estructurada multicolumna de la bitácora institucional a CSV
-        document.getElementById('exportCsvBtn').addEventListener('click', async () => {
-            const token = sessionStorage.getItem('mseptem_token');
-            try {
-                const response = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=1&limit=1000\`, { 
-                    method: 'GET', 
-                    headers: { 'Authorization': 'Bearer ' + token } 
-                });
-                if(response.ok) {
-                    const resJson = await response.json();
-                    const mensajes = resJson.data;
-                    if(mensajes.length === 0) { 
-                        showToast('No existen registros para exportar.', 'error'); 
-                        return; 
-                    }
-                    
-                    let csvContent = "\\uFEFF"; // BOM para compatibilidad utf-8 en Microsoft Excel
-                    csvContent += "ID,Remitente,Contacto,Telefono,Rango Inversion,Pais,Requerimiento,Fecha\\n";
-                    mensajes.forEach(m => { 
-                        csvContent += \`\${m.id},"\${m.nombre}","\${m.email}","\${m.telefono}","\${m.monto_inversion}","\${m.pais}","\${m.mensaje}","\${new Date(m.fecha).toLocaleString()}"\\n\`; 
+    // Procesamiento seguro del cambio de firma criptográfica
+    document.getElementById('updatePasswordForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const token = sessionStorage.getItem('mseptem_token');
+        const payload = { 
+            passwordActual: document.getElementById('passwordActual').value, 
+            passwordNuevo: document.getElementById('passwordNuevo').value 
+        };
+        try {
+            const response = await fetch('/api/admin/update-password', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, 
+                body: JSON.stringify(payload) 
+            });
+            const data = await response.json();
+            if (response.ok) { 
+                showToast('Firma actualizada. Autentíquese nuevamente.', 'success'); 
+                ejecutarCierreSesionForzado(); 
+            } else { 
+                showToast('Error: ' + data.error, 'error'); 
+            }
+        } catch (error) { 
+            showToast('Error al reestructurar firma criptográfica.', 'error'); 
+        }
+    });
+
+    // Sincronización de la bitácora multicriterio en tiempo real
+    async function cargarMensajesDashboard() {
+        const token = sessionStorage.getItem('mseptem_token');
+        try {
+            const response = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=\${paginaActual}&limit=5\`, { 
+                method: 'GET', 
+                headers: { 'Authorization': 'Bearer ' + token } 
+            });
+            if(response.ok) {
+                const resJson = await response.json();
+                const mensajes = resJson.data;
+                const pag = resJson.pagination;
+                const tbody = document.getElementById('mensajesTableBody');
+                tbody.innerHTML = '';
+                
+                if(mensajes.length === 0) { 
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted);">No hay comunicaciones entrantes en el registro corporativo.</td></tr>'; 
+                } else {
+                    mensajes.forEach(m => {
+                        const tr = document.createElement('tr');
+                        const rangosMonto = { tier_1: '\$250K - \$1M', tier_2: '\$1M - \$5M', tier_3: '\$5M+' };
+                        const inversionFormateada = rangosMonto[m.monto_inversion] || m.monto_inversion;
+                        tr.innerHTML = '<td>' + m.nombre + '</td><td>' + m.email + '</td><td>' + m.telefono + '</td><td style="color:var(--gold-primary); font-weight:600;">' + inversionFormateada + '</td><td>' + m.pais + '</td><td>' + m.mensaje + '</td><td>' + new Date(m.fecha).toLocaleString() + '</td>';
+                        tbody.appendChild(tr);
                     });
-                    
-                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement("a");
-                    link.setAttribute("href", url); 
-                    link.setAttribute("download", \`MSEPTEM_AUDIT_\${new Date().toISOString().slice(0,10)}.csv\`);
-                    document.body.appendChild(link); 
-                    link.click(); 
-                    document.body.removeChild(link);
                 }
-            } catch (error) { 
-                showToast('Error al exportar.', 'error'); 
+                
+                document.getElementById('pageIndicator').innerText = \`Página \${pag.page} de \${pag.totalPaginas || 1}\`;
+                document.getElementById('prevPageBtn').disabled = pag.page <= 1;
+                document.getElementById('nextPageBtn').disabled = pag.page >= pag.totalPaginas;
+                
+                publicView.classList.add('hidden'); 
+                loginView.classList.add('hidden'); 
+                configView.classList.add('hidden'); 
+                twoFactorView.classList.add('hidden');
+                dashboardView.classList.remove('hidden');
+                
+                renderizarGraficoMetricas();
+            } else { 
+                ejecutarCierreSesionForzado(); 
+                showToast('Sesión inválida o expirada.', 'error'); 
             }
-        });
-
-        // Protocolo perimetral para el cierre manual o forzado por inactividad
-        function ejecutarCierreSesionForzado() {
-            clearInterval(cuentaRegresivaInactividad);
-            sessionStorage.removeItem('mseptem_token');
-            dashboardView.classList.add('hidden'); 
-            configView.classList.add('hidden'); 
-            publicView.classList.remove('hidden');
-            showToast('Consola de administración cerrada.', 'success');
+        } catch (error) { 
+            showToast('Fallo al sincronizar consola corporativa.', 'error'); 
         }
+    }
 
-        document.getElementById('logoutBtn').addEventListener('click', ejecutarCierreSesionForzado);
+    // Exportador integral de auditorías físicas a formato CSV
+    document.getElementById('exportCsvBtn').addEventListener('click', async () => {
+        const token = sessionStorage.getItem('mseptem_token');
+        try {
+            const response = await fetch(\`/api/admin/mensajes?search=\${busquedaActual}&page=1&limit=1000\`, { 
+                method: 'GET', 
+                headers: { 'Authorization': 'Bearer ' + token } 
+            });
+            if(response.ok) {
+                const resJson = await response.json();
+                const mensajes = resJson.data;
+                if(mensajes.length === 0) { 
+                    showToast('No existen registros para exportar.', 'error'); 
+                    return; 
+                }
+                
+                let csvContent = "\\uFEFF"; // BOM para compatibilidad utf-8 (Acentos y caracteres en Excel)
+                csvContent += "ID,Remitente,Contacto,Telefono,Rango Inversion,Pais,Requerimiento,Fecha\\n";
+                mensajes.forEach(m => { 
+                    csvContent += \`\${m.id},"\${m.nombre}","\${m.email}","\${m.telefono}","\${m.monto_inversion}","\${m.pais}","\${m.mensaje}","\${new Date(m.fecha).toLocaleString()}"\\n\`; 
+                });
+                
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.setAttribute("href", url); 
+                link.setAttribute("download", \`MSEPTEM_AUDIT_\${new Date().toISOString().slice(0,10)}.csv\`);
+                document.body.appendChild(link); 
+                link.click(); 
+                document.body.removeChild(link);
+            }
+        } catch (error) { 
+            showToast('Error de empaquetado al exportar la bitácora.', 'error'); 
+        }
+    });
+
+    // Protocolo preventivo por inactividad prolongada de operadores
+    function ejecutarCierreSesionForzado() {
+        clearInterval(cuentaRegresivaInactividad);
+        sessionStorage.removeItem('mseptem_token');
+        dashboardView.classList.add('hidden'); 
+        configView.classList.add('hidden'); 
+        publicView.classList.remove('hidden');
+        showToast('Consola de administración cerrada de forma segura.', 'success');
+    }
+
+    document.getElementById('logoutBtn').addEventListener('click', ejecutarCierreSesionForzado);
     </script>
 </body>
 </html>
